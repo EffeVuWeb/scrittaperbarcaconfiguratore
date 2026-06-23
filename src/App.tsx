@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FormData, FinishType, UserType, FontStyle, MountingMethod } from './types';
-import { FONT_OPTIONS, FINISH_OPTIONS, MOUNTING_OPTIONS, THICKNESS_OPTIONS } from './constants';
+import { FONT_OPTIONS, FINISH_OPTIONS, MOUNTING_OPTIONS, THICKNESS_OPTIONS, PAINTED_COLOR_OPTIONS } from './constants';
 import Preview3D from './components/Preview3D';
 import FontFaceLoader, { getFontFaceName } from './components/FontFaceLoader';
+import { uploadProjectFile } from './services/uploadService';
 import {
   User,
   Anchor,
@@ -17,25 +18,10 @@ import {
   AlertCircle,
   Info,
   Type,
-  Loader2
+  Loader2,
+  RefreshCw
 } from 'lucide-react';
 import { sendQuoteRequest } from './services/emailService';
-
-const PAINTED_COLOR_OPTIONS = [
-  { name: 'Blu', hex: '#1B3A6B' },
-  { name: 'Bianco', hex: '#FFFFFF' },
-  { name: 'Nero', hex: '#111111' },
-  { name: 'Grigio', hex: '#9CA3AF' },
-  { name: 'Rosso', hex: '#C0392B' },
-  { name: 'Arancione', hex: '#E67E22' },
-  { name: 'Giallo', hex: '#F1C40F' },
-  { name: 'Verde', hex: '#2E7D32' },
-  { name: 'Celeste', hex: '#38BDF8' },
-  { name: 'Rosa', hex: '#EC4899' },
-  { name: 'Viola', hex: '#7C3AED' },
-  { name: 'Marrone', hex: '#8B4513' },
-  { name: 'Simil Oro', hex: '#C9A227' },
-] as const;
 
 const App: React.FC = () => {
   const [step, setStep] = useState(1);
@@ -139,11 +125,10 @@ const App: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'auto' });
   }, [step]);
 
-  // SPB TRACKING — notifica GTM parent quando utente arriva allo step Dati
   useEffect(() => {
     if (step === 4) {
       window.parent.postMessage(
-        { type: 'spb_event', event: 'configurator_step_dati' },
+        { type: 'spb_event', event: 'spb_step_dati' },
         'https://www.scrittaperbarca.com'
       );
     }
@@ -1121,7 +1106,7 @@ const App: React.FC = () => {
           {step === 3 && renderStep5FinishAndMount()}
           {step === 4 && renderStep4UserAndPersonal()}
           {/* Preview3D sempre montato all'ultimo step per mantenere il ref valido per lo screenshot */}
-          {step === 4 && !formData.projectImage && (
+          {step === 4 && formData.boatName.trim().length > 0 && (
             // Mount preview off-screen but with a reasonable size so canvas is rendered at full resolution
             <div style={{ position: 'absolute', left: '-9999px', top: 0, width: 800, height: 600, overflow: 'hidden' }}>
               <Preview3D
@@ -1175,24 +1160,25 @@ const App: React.FC = () => {
                 setSendError(null);
                 try {
                   const screenshot = await capturePreviewWithRetry();
+                  const projectImageUrl = formData.projectImage
+                    ? await uploadProjectFile(formData.projectImage.name, formData.projectImage.dataUri)
+                    : null;
                   // client-side debug log
                   if (screenshot) console.log('DEBUG (client): preview_screenshot length =', screenshot.length, screenshot.slice(0,40));
                   else console.log('DEBUG (client): no preview_screenshot captured');
+                  if (projectImageUrl) console.log('DEBUG (client): project_image_url =', projectImageUrl);
                   
                   // Log total payload size estimate
                   const projectDataSize = formData.projectImage?.dataUri?.length || 0;
                   const screenshotSize = screenshot?.length || 0;
                   console.log(`DEBUG (client): Total payload estimate - Screenshot: ${screenshotSize}B, ProjectFile: ${projectDataSize}B, Total: ${screenshotSize + projectDataSize}B`);
                   
-                  await sendQuoteRequest(formData, screenshot);
-                  setIsSent(true);
-
-                  // SPB TRACKING — invia evento Lead al GTM parent con dati per CAPI
+                  await sendQuoteRequest(formData, screenshot, projectImageUrl);
                   const spbEventId = 'lead_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
                   window.parent.postMessage(
                     {
                       type: 'spb_event',
-                      event: 'configurator_lead',
+                      event: 'spb_lead',
                       event_id: spbEventId,
                       email: formData.email || '',
                       phone: formData.phone || '',
@@ -1204,9 +1190,13 @@ const App: React.FC = () => {
                     },
                     'https://www.scrittaperbarca.com'
                   );
+                  // Delay per dare tempo a GTM (CAPI fetch) di completare prima della navigazione
+                  await new Promise(r => setTimeout(r, 600));
+                  window.top!.location.href = 'https://www.scrittaperbarca.com/thank-you';
                 } catch (error) {
                   console.error("DEBUG - Errore invio EmailJS:", error);
-                  setSendError("Si è verificato un errore durante l'invio. Riprova più tardi.");
+                  const message = error instanceof Error ? error.message : "Si è verificato un errore durante l'invio. Riprova più tardi.";
+                  setSendError(message);
                 } finally {
                   setIsSending(false);
                 }
@@ -1239,41 +1229,6 @@ const App: React.FC = () => {
           )}
 
         </div>
-
-        {/* Success/Error Overlay */}
-        {isSent && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl p-8 max-w-md w-full text-center shadow-2xl animate-in zoom-in duration-300">
-              <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                <CheckCircle2 size={40} />
-              </div>
-              <h3 className="text-2xl font-bold text-slate-800 mb-2">Richiesta Inviata!</h3>
-              <p className="text-slate-600 mb-6">
-                Grazie {formData.userType === UserType.PRIVATE ? formData.firstName : formData.ragioneSociale}. Abbiamo ricevuto i dettagli della tua configurazione della tua scritta <strong>{formData.boatName}</strong>.
-                Ti risponderemo al più presto all'indirizzo {formData.email}.
-              </p>
-              <button
-                onClick={() => window.location.reload()}
-                className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition-colors"
-              >
-                Chiudi
-              </button>
-            </div>
-          </div>
-        )}
-
-        {sendError && (
-          <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[100] w-full max-w-sm px-4">
-            <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl shadow-lg flex items-center gap-3 animate-in fade-in slide-in-from-bottom-4">
-              <AlertCircle size={20} className="shrink-0" />
-              <p className="text-sm font-medium">{sendError}</p>
-              <button onClick={() => setSendError(null)} className="ml-auto text-red-400 hover:text-red-600">
-                &times;
-              </button>
-            </div>
-          </div>
-        )}
-
       </div>
     </div>
   );
