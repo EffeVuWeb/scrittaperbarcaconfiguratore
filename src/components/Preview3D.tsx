@@ -16,6 +16,7 @@ interface Preview3DProps {
     mountingMethod?: MountingMethod;
     lengthCm?: number | string;
     heightCm?: number | string;
+    measurementsEnabled?: boolean;
 }
 
 // --- Utils: Font URL Construction ---
@@ -48,7 +49,7 @@ function getShapesFromFont(font: opentype.Font, text: string, size: number): THR
             case 'L': shapePath.lineTo(cmd.x, cmd.y); break;
             case 'Q': shapePath.quadraticCurveTo(cmd.x1, cmd.y1, cmd.x, cmd.y); break;
             case 'C': shapePath.bezierCurveTo(cmd.x1, cmd.y1, cmd.x2, cmd.y2, cmd.x, cmd.y); break;
-            case 'Z': shapePath.currentPath.closePath(); break;
+            case 'Z': shapePath.currentPath?.closePath(); break;
         }
     });
     return shapePath.toShapes(true);

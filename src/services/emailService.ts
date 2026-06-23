@@ -46,8 +46,8 @@ export const sendQuoteRequest = async (formData: FormData, screenshot: string | 
     } else {
       console.log('DEBUG: no preview_screenshot present');
     }
-    if (templateParams.project_image_data) {
-      try { console.log('DEBUG: project_image_data length =', String(templateParams.project_image_data).length); } catch (e) { /* ignore */ }
+    if (templateParams.project_image_name) {
+      try { console.log('DEBUG: project_image_name =', templateParams.project_image_name); } catch (e) { /* ignore */ }
     }
 
     const response = await emailjs.send(
